@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 try:
     import yt_dlp
+    from yt_dlp.utils import DownloadError
 except ImportError:
     print("yt-dlp no está instalado. Instálalo con: pip install -r requirements.txt")
     sys.exit(1)
@@ -47,49 +48,105 @@ def ensure_ffmpeg_available() -> None:
         raise RuntimeError("Falta FFmpeg/FFprobe. Instálalos para descargar en formato mp3, o para obtener mp4 con mezcla automática.")
 
 
-def build_download_options(fmt: str, output_dir: Path, ffmpeg_available: bool) -> dict:
-    if fmt == "mp3":
-        if not ffmpeg_available:
-            raise RuntimeError("La conversión a MP3 requiere FFmpeg/FFprobe. Instálalos e inténtalo de nuevo.")
-        return {
-            "format": "bestaudio/best",
-            "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "0",
-                }
-            ],
-            "quiet": True,
-            "noplaylist": True,
-        }
+def detect_js_runtime() -> str | None:
+    for runtime in ["deno", "node", "nodejs"]:
+        if shutil.which(runtime):
+            return runtime
+    return None
 
-    if ffmpeg_available:
-        return {
-            "format": "bestvideo+bestaudio/best",
-            "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
-            "quiet": True,
-            "noplaylist": True,
-            "merge_output_format": "mp4",
-        }
 
-    return {
-        "format": "best[ext=mp4]/best",
+def build_download_options(
+    fmt: str,
+    output_dir: Path,
+    ffmpeg_available: bool,
+    js_runtime: str | None = None,
+    cookiefile: str | None = None,
+    cookies_from_browser: str | None = None,
+) -> dict:
+    opts = {
         "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
         "quiet": True,
         "noplaylist": True,
     }
 
+    if js_runtime:
+        opts["js_runtime"] = js_runtime
 
-def download_youtube(url: str, fmt: str, output_dir: Path | None = None) -> str:
+    if cookiefile:
+        opts["cookiefile"] = cookiefile
+    elif cookies_from_browser:
+        opts["cookies_from_browser"] = cookies_from_browser
+
+    if fmt == "mp3":
+        if not ffmpeg_available:
+            raise RuntimeError("La conversión a MP3 requiere FFmpeg/FFprobe. Instálalos e inténtalo de nuevo.")
+        opts.update(
+            {
+                "format": "bestaudio/best",
+                "postprocessors": [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "0",
+                    }
+                ],
+            }
+        )
+        return opts
+
+    if ffmpeg_available:
+        opts.update(
+            {
+                "format": "bestvideo+bestaudio/best",
+                "merge_output_format": "mp4",
+            }
+        )
+    else:
+        opts.update(
+            {
+                "format": "best[ext=mp4]/best",
+            }
+        )
+    return opts
+
+
+def download_youtube(
+    url: str,
+    fmt: str,
+    output_dir: Path | None = None,
+    cookiefile: str | None = None,
+    cookies_from_browser: str | None = None,
+    js_runtime: str | None = None,
+) -> str:
     output_dir = output_dir or OUTPUT_DIR
     output_dir.mkdir(exist_ok=True)
     fmt = normalize_format(fmt)
     validate_youtube_url(url)
     ffmpeg_available = is_ffmpeg_available()
 
-    ydl_opts = build_download_options(fmt, output_dir, ffmpeg_available)
+    ydl_opts = build_download_options(
+        fmt,
+        output_dir,
+        ffmpeg_available,
+        js_runtime=js_runtime,
+        cookiefile=cookiefile,
+        cookies_from_browser=cookies_from_browser,
+    )
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if not info:
+                raise RuntimeError("No se pudo obtener información del video.")
+            title = info.get("title", "video")
+            print(f"Descarga completada: {title}")
+            return title
+    except DownloadError as exc:
+        message = str(exc)
+        if "sign in to confirm" in message.lower() or "cookies" in message.lower():
+            raise RuntimeError(
+                "YouTube requiere autenticación. Usa --cookies o --cookies-from-browser para pasar cookies de navegador."
+            ) from exc
+        raise
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         if not info:
@@ -104,6 +161,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--url", help="Enlace de YouTube")
     parser.add_argument("--format", choices=["mp3", "mp4", "audio", "video"], help="Formato de salida")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR), help="Directorio donde guardar las descargas")
+    parser.add_argument("--cookies", help="Ruta al archivo de cookies de navegador")
+    parser.add_argument(
+        "--cookies-from-browser",
+        choices=["chrome", "firefox", "edge", "safari"],
+        help="Importar cookies directamente de un navegador compatible",
+    )
+    parser.add_argument(
+        "--js-runtime",
+        choices=["deno", "node", "nodejs"],
+        help="Runtime JavaScript para yt-dlp (si está instalado)",
+    )
     return parser.parse_args()
 
 
