@@ -1,8 +1,8 @@
-import os
+import argparse
 import shutil
-import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     import yt_dlp
@@ -30,19 +30,24 @@ def normalize_format(fmt: str) -> str:
     raise ValueError("Formato inválido. Usa 'mp3' o 'mp4' (también puedes escribir 'audio' o 'video').")
 
 
+def validate_youtube_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("La URL debe comenzar con http:// o https://")
+    if "youtube.com" not in parsed.netloc and "youtu.be" not in parsed.netloc:
+        raise ValueError("La URL debe ser un enlace de YouTube.")
+
+
 def ensure_ffmpeg_available() -> None:
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         raise RuntimeError("Falta FFmpeg/FFprobe. Instálalos para descargar en formato mp4 o mp3.")
 
 
-def download_youtube(url: str, fmt: str) -> None:
-    fmt = normalize_format(fmt)
-
+def build_download_options(fmt: str, output_dir: Path) -> dict:
     if fmt == "mp3":
-        ensure_ffmpeg_available()
-        ydl_opts = {
+        return {
             "format": "bestaudio/best",
-            "outtmpl": str(OUTPUT_DIR / "%(title)s.%(ext)s"),
+            "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
             "postprocessors": [
                 {
                     "key": "FFmpegExtractAudio",
@@ -53,30 +58,58 @@ def download_youtube(url: str, fmt: str) -> None:
             "quiet": True,
             "noplaylist": True,
         }
-    else:
-        ensure_ffmpeg_available()
-        ydl_opts = {
-            "format": "bestvideo+bestaudio/best",
-            "outtmpl": str(OUTPUT_DIR / "%(title)s.%(ext)s"),
-            "quiet": True,
-            "noplaylist": True,
-        }
 
+    return {
+        "format": "bestvideo+bestaudio/best",
+        "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
+        "quiet": True,
+        "noplaylist": True,
+        "merge_output_format": "mp4",
+    }
+
+
+def download_youtube(url: str, fmt: str, output_dir: Path | None = None) -> str:
+    output_dir = output_dir or OUTPUT_DIR
+    output_dir.mkdir(exist_ok=True)
+    fmt = normalize_format(fmt)
+    validate_youtube_url(url)
+    ensure_ffmpeg_available()
+
+    ydl_opts = build_download_options(fmt, output_dir)
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
+        if not info:
+            raise RuntimeError("No se pudo obtener información del video.")
         title = info.get("title", "video")
         print(f"Descarga completada: {title}")
+        return title
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Descargador de YouTube")
+    parser.add_argument("--url", help="Enlace de YouTube")
+    parser.add_argument("--format", choices=["mp3", "mp4", "audio", "video"], help="Formato de salida")
+    parser.add_argument("--output-dir", default=str(OUTPUT_DIR), help="Directorio donde guardar las descargas")
+    return parser.parse_args()
+
+
+def main() -> int:
+    print("=== Descargador de YouTube ===")
+    args = parse_args()
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    output_dir.mkdir(exist_ok=True)
+
+    url = args.url or input("URL: ").strip()
+    fmt = args.format or input("Formato (mp3/mp4/audio/video): ").strip()
+
+    try:
+        download_youtube(url, fmt, output_dir=output_dir)
+        print(f"Archivos guardados en: {output_dir}")
+        return 0
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return 1
 
 
 if __name__ == "__main__":
-    print("=== Descargador de YouTube ===")
-    print("Introduce el enlace de YouTube")
-    url = input("URL: ").strip()
-    fmt = input("Formato (mp3/mp4/audio/video): ").strip()
-
-    try:
-        download_youtube(url, fmt)
-        print(f"Archivos guardados en: {OUTPUT_DIR.resolve()}")
-    except Exception as exc:
-        print(f"Error: {exc}")
-        sys.exit(1)
+    sys.exit(main())

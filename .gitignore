@@ -17,3 +17,7 @@ venv/
 
 # OS files
 .DS_Store
+
+# Downloaded media
+downloads/*
+!downloads/.gitkeep
