@@ -38,13 +38,19 @@ def validate_youtube_url(url: str) -> None:
         raise ValueError("La URL debe ser un enlace de YouTube.")
 
 
+def is_ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
 def ensure_ffmpeg_available() -> None:
-    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
-        raise RuntimeError("Falta FFmpeg/FFprobe. Instálalos para descargar en formato mp4 o mp3.")
+    if not is_ffmpeg_available():
+        raise RuntimeError("Falta FFmpeg/FFprobe. Instálalos para descargar en formato mp3, o para obtener mp4 con mezcla automática.")
 
 
-def build_download_options(fmt: str, output_dir: Path) -> dict:
+def build_download_options(fmt: str, output_dir: Path, ffmpeg_available: bool) -> dict:
     if fmt == "mp3":
+        if not ffmpeg_available:
+            raise RuntimeError("La conversión a MP3 requiere FFmpeg/FFprobe. Instálalos e inténtalo de nuevo.")
         return {
             "format": "bestaudio/best",
             "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
@@ -59,12 +65,20 @@ def build_download_options(fmt: str, output_dir: Path) -> dict:
             "noplaylist": True,
         }
 
+    if ffmpeg_available:
+        return {
+            "format": "bestvideo+bestaudio/best",
+            "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
+            "quiet": True,
+            "noplaylist": True,
+            "merge_output_format": "mp4",
+        }
+
     return {
-        "format": "bestvideo+bestaudio/best",
+        "format": "best[ext=mp4]/best",
         "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
         "quiet": True,
         "noplaylist": True,
-        "merge_output_format": "mp4",
     }
 
 
@@ -73,9 +87,9 @@ def download_youtube(url: str, fmt: str, output_dir: Path | None = None) -> str:
     output_dir.mkdir(exist_ok=True)
     fmt = normalize_format(fmt)
     validate_youtube_url(url)
-    ensure_ffmpeg_available()
+    ffmpeg_available = is_ffmpeg_available()
 
-    ydl_opts = build_download_options(fmt, output_dir)
+    ydl_opts = build_download_options(fmt, output_dir, ffmpeg_available)
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         if not info:

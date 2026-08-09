@@ -13,10 +13,10 @@ class TestFormatHandling(unittest.TestCase):
         validate_youtube_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
     @patch("main.shutil.which", side_effect=lambda name: None if name in {"ffmpeg", "ffprobe"} else "/usr/bin/true")
-    def test_mp4_without_ffmpeg_raises_clear_error(self, _mock_which):
+    def test_mp4_without_ffmpeg_still_builds_options(self, _mock_which):
         with self.assertRaises(RuntimeError) as ctx:
-            download_youtube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "video")
-        self.assertIn("ffmpeg", str(ctx.exception).lower())
+            download_youtube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "audio")
+        self.assertIn("FFmpeg/FFprobe", str(ctx.exception))
 
 
 if __name__ == "__main__":
