@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -14,11 +15,31 @@ OUTPUT_DIR = Path("downloads")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
+def normalize_format(fmt: str) -> str:
+    normalized = fmt.strip().lower()
+    aliases = {
+        "mp3": "mp3",
+        "audio": "mp3",
+        "sonido": "mp3",
+        "mp4": "mp4",
+        "video": "mp4",
+        "vídeo": "mp4",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    raise ValueError("Formato inválido. Usa 'mp3' o 'mp4' (también puedes escribir 'audio' o 'video').")
+
+
+def ensure_ffmpeg_available() -> None:
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        raise RuntimeError("Falta FFmpeg/FFprobe. Instálalos para descargar en formato mp4 o mp3.")
+
+
 def download_youtube(url: str, fmt: str) -> None:
-    if fmt not in {"mp3", "mp4"}:
-        raise ValueError("Formato inválido. Usa 'mp3' o 'mp4'.")
+    fmt = normalize_format(fmt)
 
     if fmt == "mp3":
+        ensure_ffmpeg_available()
         ydl_opts = {
             "format": "bestaudio/best",
             "outtmpl": str(OUTPUT_DIR / "%(title)s.%(ext)s"),
@@ -33,6 +54,7 @@ def download_youtube(url: str, fmt: str) -> None:
             "noplaylist": True,
         }
     else:
+        ensure_ffmpeg_available()
         ydl_opts = {
             "format": "bestvideo+bestaudio/best",
             "outtmpl": str(OUTPUT_DIR / "%(title)s.%(ext)s"),
@@ -50,7 +72,7 @@ if __name__ == "__main__":
     print("=== Descargador de YouTube ===")
     print("Introduce el enlace de YouTube")
     url = input("URL: ").strip()
-    fmt = input("Formato (mp3/mp4): ").strip().lower()
+    fmt = input("Formato (mp3/mp4/audio/video): ").strip()
 
     try:
         download_youtube(url, fmt)
