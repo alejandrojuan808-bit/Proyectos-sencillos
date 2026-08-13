@@ -21,3 +21,6 @@ venv/
 # Downloaded media
 downloads/*
 !downloads/.gitkeep
+
+# VS Code settings
+.vscode/
